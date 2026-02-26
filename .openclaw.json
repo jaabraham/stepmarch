@@ -1,0 +1,46 @@
+{
+  "project": "StepMarch",
+  "version": "1.0.0",
+  "description": "GPU-Accelerated Multi-Fractal 3D Renderer with Animation System",
+  "repository": "https://github.com/jaabraham/stepmarch",
+  "author": "Jeff Abraham",
+  "license": "MIT",
+  "created": "2026-02-26",
+  "openclaw": {
+    "session_id": "stepmarch-v1-0-0",
+    "last_updated": "2026-02-26T14:50:00Z",
+    "agent": "OpenClaw",
+    "context": {
+      "primary_language": "C++",
+      "gpu_api": "OpenCL",
+      "gui_framework": "Dear ImGui",
+      "build_system": "Make"
+    },
+    "key_files": [
+      "src/gui_multi_fractal.cpp",
+      "src/multi_fractal.cl",
+      "src/high_quality.cl",
+      "src/animation.h",
+      "Makefile"
+    ],
+    "dependencies": [
+      "OpenCL 1.2+",
+      "SDL2",
+      "libpng",
+      "OpenGL 3.0+"
+    ],
+    "build_command": "make multi",
+    "run_command": "./stepmarch_multi",
+    "test_command": "./stepmarch_multi --test"
+  },
+  "update_notes": {
+    "v1.0.0": "Initial release with 7 fractal types, animation system, and high-quality rendering"
+  },
+  "known_issues": [],
+  "todo": [
+    "Environment lighting / HDRI support",
+    "More fractal types (KIFS, IFS)",
+    "Voxel export for 3D printing",
+    "Python scripting API"
+  ]
+}

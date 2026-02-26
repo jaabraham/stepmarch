@@ -1,0 +1,32 @@
+# Build artifacts
+*.o
+*.obj
+stepmarch_multi
+stepmarch_anim
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+debug.txt
+
+# Generated outputs
+output/*.png
+output/*.mp4
+
+# User config (optional - uncomment to ignore)
+# ~/.config/stepmarch/
+
+# Backup files
+*.bak
+*.broken
