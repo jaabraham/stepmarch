@@ -2,6 +2,10 @@
 
 All notable changes to StepMarch will be documented in this file.
 
+## [1.0.4] - 2026-02-26
+
+Stable release with all v1.0.x bugfixes and UI improvements.
+
 ## [1.0.3] - 2026-02-26
 
 ### Added
