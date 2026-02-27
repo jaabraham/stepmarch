@@ -16,6 +16,14 @@ enum FractalType {
     FRACTAL_COUNT
 };
 
+// Color mode enumeration for choosing coloring attribute
+enum ColorMode {
+    COLOR_MODE_ITERATION = 0,   // Color based on iteration count
+    COLOR_MODE_ORBIT_TRAP,      // Color based on orbit trap (min distance)
+    COLOR_MODE_COMBINED,        // Blend of iteration and orbit trap
+    COLOR_MODE_COUNT
+};
+
 // Fractal-specific parameters (in addition to base Params)
 typedef struct {
     // Fractal type
@@ -35,7 +43,8 @@ typedef struct {
     
     // Apollonian parameters
     float apollonian_scale;
-    int apollonian_iterations;
+    float apollonian_offset;   // Offset folding center for asymmetry
+    float apollonian_power;    // Power for inversion (changes curvature)
     
     // Menger parameters
     float menger_scale;
@@ -44,6 +53,12 @@ typedef struct {
     // Sierpinski parameters
     float sierpinski_scale;
     int sierpinski_iterations;
+    
+    // Color mode for choosing coloring attribute
+    int color_mode;
+    // Color range for mapping attribute to color ramp
+    float color_min;   // Minimum value for color mapping
+    float color_max;   // Maximum value for color mapping
     
 } FractalParams;
 
@@ -68,7 +83,8 @@ inline FractalParams default_fractal_params() {
     
     // Apollonian defaults
     fp.apollonian_scale = 3.0f;
-    fp.apollonian_iterations = 10;
+    fp.apollonian_offset = 0.0f;
+    fp.apollonian_power = 1.0f;
     
     // Menger defaults
     fp.menger_scale = 3.0f;
@@ -77,6 +93,12 @@ inline FractalParams default_fractal_params() {
     // Sierpinski defaults
     fp.sierpinski_scale = 2.0f;
     fp.sierpinski_iterations = 10;
+    
+    // Color mode default
+    fp.color_mode = COLOR_MODE_ITERATION;
+    // Color range defaults (match del_less/del_greater initially)
+    fp.color_min = 0.0f;
+    fp.color_max = 100.0f;
     
     return fp;
 }

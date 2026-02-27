@@ -36,6 +36,16 @@ extern "C" {
 #define PREVIEW_HEIGHT 384
 #define PI 3.14159265359f
 
+// Debug data structure for geometry spreadsheet
+typedef struct {
+    int pixel_x, pixel_y;  // Pixel coordinates
+    float px, py, pz;      // Position
+    float iteration;       // Iteration count
+    float trap;            // Orbit trap value
+    float col_r, col_g, col_b;  // Final color
+    int hit;               // 1 if hit, 0 if miss
+} DebugPoint;
+
 // OpenCL context
 typedef struct {
     cl_platform_id platform;
@@ -46,6 +56,7 @@ typedef struct {
     cl_kernel kernel;
     cl_mem color_buffer;
     cl_mem depth_buffer;
+    cl_mem debug_buffer;   // Debug data buffer
     int width;
     int height;
 } OpenCLContext;
@@ -114,6 +125,11 @@ int init_opencl(OpenCLContext* ctx, int width, int height) {
     ctx->depth_buffer = clCreateBuffer(ctx->context, CL_MEM_WRITE_ONLY, depth_size, NULL, &err);
     if (err != CL_SUCCESS) return -1;
     
+    // Create debug buffer for all preview pixels (PREVIEW_WIDTH * PREVIEW_HEIGHT)
+    size_t debug_size = PREVIEW_WIDTH * PREVIEW_HEIGHT * sizeof(DebugPoint);
+    ctx->debug_buffer = clCreateBuffer(ctx->context, CL_MEM_WRITE_ONLY, debug_size, NULL, &err);
+    if (err != CL_SUCCESS) return -1;
+    
     return 0;
 }
 
@@ -129,6 +145,9 @@ void render_fractal(OpenCLContext* ctx, Params* p, float* output) {
     
     err = clSetKernelArg(ctx->kernel, arg++, sizeof(cl_mem), &ctx->color_buffer);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_mem), &ctx->depth_buffer);
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_mem), &ctx->debug_buffer);
+    int debug_enabled = 1;  // Always capture debug data
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_int), &debug_enabled);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_int), &ctx->width);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_int), &ctx->height);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(cl_float3), &cam_origin);
@@ -164,11 +183,13 @@ void render_fractal(OpenCLContext* ctx, Params* p, float* output) {
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->mandelbox_folding);
     // Apollonian params
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->apollonian_scale);
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->apollonian_offset);
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->apollonian_power);
     // Menger params
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->menger_scale);
     // Sierpinski params
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->sierpinski_scale);
-    // Color ramp params - pass all 41 values individually
+    // Color ramp params - pass all values individually
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(int), &p->color_ramp.num_stops);
     // Positions (8 values)
     for (int i = 0; i < 8; i++) {
@@ -194,6 +215,11 @@ void render_fractal(OpenCLContext* ctx, Params* p, float* output) {
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->specular_intensity);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->shininess);
     err |= clSetKernelArg(ctx->kernel, arg++, sizeof(int), &p->metallic);
+    // Color mode (0=iteration, 1=orbit trap, 2=combined)
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(int), &p->color_mode);
+    // Color range
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->color_min);
+    err |= clSetKernelArg(ctx->kernel, arg++, sizeof(float), &p->color_max);
     
     if (err != CL_SUCCESS) {
         fprintf(stderr, "Error setting kernel args: %d\n", err);
@@ -579,6 +605,7 @@ void export_image(OpenCLContext* ctx, Params* p, int width, int height, const ch
     
     clReleaseMemObject(highres.color_buffer);
     clReleaseMemObject(highres.depth_buffer);
+    if (highres.debug_buffer) clReleaseMemObject(highres.debug_buffer);
     clReleaseKernel(highres.kernel);
     clReleaseProgram(highres.program);
     clReleaseCommandQueue(highres.queue);
@@ -733,6 +760,8 @@ void export_image_high_quality(OpenCLContext* ctx, Params* p, int width, int hei
     
     // Apollonian
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->apollonian_scale);
+    err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->apollonian_offset);
+    err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->apollonian_power);
     
     // Menger
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->menger_scale);
@@ -749,6 +778,11 @@ void export_image_high_quality(OpenCLContext* ctx, Params* p, int width, int hei
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->specular_intensity);
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->shininess);
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(int), &p->metallic);
+    
+    // Color mode and range
+    err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(int), &p->color_mode);
+    err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->color_min);
+    err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(float), &p->color_max);
     
     // Color ramp
     err |= clSetKernelArg(hq_ctx.kernel, arg++, sizeof(int), &p->color_ramp.num_stops);
@@ -860,7 +894,7 @@ int find_prev_keyframe(const AnimationProject& proj, int current_frame) {
 }
 
 // Draw timeline widget
-void draw_timeline(AnimationProject& proj, int& current_frame, bool& params_changed,
+void draw_timeline(AnimationProject& proj, int& current_frame, Params& params, bool& params_changed,
                    bool& is_playing, bool& jump_to_next_kf, bool& jump_to_prev_kf) {
     ImGui::Separator();
     ImGui::Text("Timeline");
@@ -922,8 +956,8 @@ void draw_timeline(AnimationProject& proj, int& current_frame, bool& params_chan
     ImGui::SameLine();
     
     if (ImGui::Button("Add KF", ImVec2(70, 25))) {
-        set_keyframe(proj, current_frame, proj.keyframes.empty() ? default_params() : 
-                     interpolate_params(proj, current_frame));
+        // Always use current params when adding a keyframe
+        set_keyframe(proj, current_frame, params);
     }
     ImGui::SameLine();
     
@@ -1387,6 +1421,175 @@ int main(int argc, char** argv) {
         
         ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2(PREVIEW_WIDTH, PREVIEW_HEIGHT));
         
+        // Pixel picker state (for clicking on preview)
+        static int picked_pixel_x = -1;
+        static int picked_pixel_y = -1;
+        
+        // Check for pixel click on preview
+        if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)) {
+            ImVec2 mouse_pos = ImGui::GetMousePos();
+            ImVec2 img_pos = ImGui::GetItemRectMin();
+            float rel_x = mouse_pos.x - img_pos.x;
+            float rel_y = mouse_pos.y - img_pos.y;
+            if (rel_x >= 0 && rel_x < PREVIEW_WIDTH && rel_y >= 0 && rel_y < PREVIEW_HEIGHT) {
+                picked_pixel_x = (int)(rel_x);
+                picked_pixel_y = (int)(rel_y);
+            }
+        }
+        
+        // Geometry Spreadsheet (Houdini-style debug view)
+        if (ImGui::CollapsingHeader("Geometry Spreadsheet", ImGuiTreeNodeFlags_DefaultOpen)) {
+            static std::vector<DebugPoint> debug_data;
+            static bool debug_initialized = false;
+            static int sort_column = -1;  // No sort by default (data stays in pixel order)
+            static bool sort_ascending = true;
+            static bool show_only_hits = true;
+            static int selected_pixel = -1;
+            
+            // Capture debug data button
+            if (ImGui::Button("Capture Debug Data", ImVec2(150, 25))) {
+                debug_data.resize(PREVIEW_WIDTH * PREVIEW_HEIGHT);
+                clEnqueueReadBuffer(cl_ctx.queue, cl_ctx.debug_buffer, CL_TRUE, 0,
+                                    PREVIEW_WIDTH * PREVIEW_HEIGHT * sizeof(DebugPoint), debug_data.data(), 0, NULL, NULL);
+                debug_initialized = true;
+                // Reset picked pixel to avoid confusion
+                if (picked_pixel_x >= 0 && picked_pixel_y >= 0) {
+                    selected_pixel = picked_pixel_y * PREVIEW_WIDTH + picked_pixel_x;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear")) {
+                debug_data.clear();
+                debug_initialized = false;
+                picked_pixel_x = -1;
+                picked_pixel_y = -1;
+                selected_pixel = -1;
+            }
+            
+            ImGui::Checkbox("Show Only Hits", &show_only_hits);
+            
+            if (picked_pixel_x >= 0 && picked_pixel_y >= 0) {
+                ImGui::Text("Picked Pixel: (%d, %d)", picked_pixel_x, picked_pixel_y);
+                ImGui::SameLine();
+                if (ImGui::Button("Go to Pixel")) {
+                    selected_pixel = picked_pixel_y * PREVIEW_WIDTH + picked_pixel_x;
+                }
+            }
+            
+            if (debug_initialized && !debug_data.empty()) {
+                // Table with fixed header and scrollable body
+                ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | 
+                                       ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable |
+                                       ImGuiTableFlags_Sortable;
+                
+                if (ImGui::BeginTable("GeometrySpreadsheet", 9, flags, ImVec2(0, 200))) {
+                    // Headers with sort capability
+                    ImGui::TableSetupColumn("Pixel (X,Y)", ImGuiTableColumnFlags_DefaultSort);
+                    ImGui::TableSetupColumn("Iteration");
+                    ImGui::TableSetupColumn("Orbit Trap");
+                    ImGui::TableSetupColumn("P.x");
+                    ImGui::TableSetupColumn("P.y");
+                    ImGui::TableSetupColumn("P.z");
+                    ImGui::TableSetupColumn("Col.r");
+                    ImGui::TableSetupColumn("Col.g");
+                    ImGui::TableSetupColumn("Col.b");
+                    ImGui::TableSetupScrollFreeze(0, 1); // Freeze header row
+                    ImGui::TableHeadersRow();
+                    
+                    // Handle sorting - ONLY sort when user clicks a column header
+                    ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs();
+                    if (sort_specs && sort_specs->SpecsDirty) {
+                        sort_column = sort_specs->Specs[0].ColumnIndex;
+                        sort_ascending = sort_specs->Specs[0].SortDirection == ImGuiSortDirection_Ascending;
+                        
+                        // Perform sort once when column is clicked
+                        std::sort(debug_data.begin(), debug_data.end(), 
+                            [&](const DebugPoint& a, const DebugPoint& b) {
+                                if (sort_column == 0) { // Pixel ID
+                                    int id_a = a.pixel_y * PREVIEW_WIDTH + a.pixel_x;
+                                    int id_b = b.pixel_y * PREVIEW_WIDTH + b.pixel_x;
+                                    return sort_ascending ? id_a < id_b : id_a > id_b;
+                                }
+                                float va, vb;
+                                switch (sort_column) {
+                                    case 1: va = a.iteration; vb = b.iteration; break;
+                                    case 2: va = a.trap; vb = b.trap; break;
+                                    case 3: va = a.px; vb = b.px; break;
+                                    case 4: va = a.py; vb = b.py; break;
+                                    case 5: va = a.pz; vb = b.pz; break;
+                                    case 6: va = a.col_r; vb = b.col_r; break;
+                                    case 7: va = a.col_g; vb = b.col_g; break;
+                                    case 8: va = a.col_b; vb = b.col_b; break;
+                                    default: va = 0; vb = 0; break;
+                                }
+                                return sort_ascending ? va < vb : va > vb;
+                            });
+                        
+                        sort_specs->SpecsDirty = false;
+                    }
+                    
+                    // Data rows
+                    int displayed = 0;
+                    for (int i = 0; i < (int)debug_data.size() && displayed < 200; i++) {
+                        const DebugPoint& p = debug_data[i];
+                        int pixel_id = p.pixel_y * PREVIEW_WIDTH + p.pixel_x;
+                        
+                        // Filter options
+                        if (show_only_hits && !p.hit) continue;
+                        
+                        // If a pixel is selected, highlight it and scroll to it
+                        bool is_selected = (pixel_id == selected_pixel);
+                        
+                        ImGui::TableNextRow();
+                        
+                        // Highlight selected row
+                        if (is_selected) {
+                            ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(100, 100, 200, 255));
+                        }
+                        
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::Text("(%d, %d)", p.pixel_x, p.pixel_y);
+                        
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%.2f", p.iteration);
+                        
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::Text("%.4f", p.trap);
+                        
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("%.4f", p.px);
+                        
+                        ImGui::TableSetColumnIndex(4);
+                        ImGui::Text("%.4f", p.py);
+                        
+                        ImGui::TableSetColumnIndex(5);
+                        ImGui::Text("%.4f", p.pz);
+                        
+                        ImGui::TableSetColumnIndex(6);
+                        ImGui::Text("%.3f", p.col_r);
+                        
+                        ImGui::TableSetColumnIndex(7);
+                        ImGui::Text("%.3f", p.col_g);
+                        
+                        ImGui::TableSetColumnIndex(8);
+                        ImGui::Text("%.3f", p.col_b);
+                        
+                        displayed++;
+                    }
+                    
+                    if (displayed == 0) {
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextDisabled("No valid data captured. Click 'Capture Debug Data' after rendering.");
+                    }
+                    
+                    ImGui::EndTable();
+                }
+            } else {
+                ImGui::TextDisabled("Click 'Capture Debug Data' to populate the spreadsheet.");
+            }
+        }
+        
         // Render buttons
         if (ImGui::Button("Refresh", ImVec2(100, 25))) {
             needs_render = true;
@@ -1413,12 +1616,16 @@ int main(int argc, char** argv) {
         ImGui::BeginChild("ControlPanel", ImVec2(0, 0), true);
         
         // TIMELINE SECTION
-        draw_timeline(proj, proj.current_frame, params_changed, is_playing, 
+        draw_timeline(proj, proj.current_frame, params, params_changed, is_playing, 
                       jump_to_next_kf, jump_to_prev_kf);
         
-        // Update params if frame changed
+        // Update params if frame changed - but only if there are keyframes to interpolate from
         if (params_changed) {
-            params = interpolate_params(proj, proj.current_frame);
+            if (!proj.keyframes.empty()) {
+                // Only interpolate if we have keyframes
+                params = interpolate_params(proj, proj.current_frame);
+            }
+            // If no keyframes, keep current params (don't reset to defaults)
             needs_render = true;
             params_changed = false;
         }
@@ -1461,23 +1668,27 @@ int main(int argc, char** argv) {
         }
         else if (params.fractal_type == 3) { // Mandelbox
             if (ImGui::CollapsingHeader("Mandelbox Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
-                changed |= ImGui::SliderFloat("Scale", &params.mandelbox_scale, -5.0f, 5.0f);
-                changed |= ImGui::SliderFloat("Folding Limit", &params.mandelbox_folding, 0.1f, 5.0f);
+                changed |= ImGui::SliderFloat("Scale##Mandelbox", &params.mandelbox_scale, -5.0f, 5.0f);
+                changed |= ImGui::SliderFloat("Folding Limit##Mandelbox", &params.mandelbox_folding, 0.1f, 5.0f);
             }
         }
         else if (params.fractal_type == 4) { // Apollonian
             if (ImGui::CollapsingHeader("Apollonian Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
-                changed |= ImGui::SliderFloat("Scale", &params.apollonian_scale, 1.0f, 10.0f);
+                changed |= ImGui::SliderFloat("Scale##Apollonian", &params.apollonian_scale, 1.0f, 10.0f);
+                changed |= ImGui::SliderFloat("Offset##Apollonian", &params.apollonian_offset, -2.0f, 2.0f);
+                changed |= ImGui::SliderFloat("Power##Apollonian", &params.apollonian_power, 0.1f, 3.0f);
+                ImGui::TextDisabled("Offset: shifts fold center (asymmetry)");
+                ImGui::TextDisabled("Power: modifies inversion curvature");
             }
         }
         else if (params.fractal_type == 5) { // Menger
             if (ImGui::CollapsingHeader("Menger Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
-                changed |= ImGui::SliderFloat("Scale", &params.menger_scale, 2.0f, 5.0f);
+                changed |= ImGui::SliderFloat("Scale##Menger", &params.menger_scale, 2.0f, 5.0f);
             }
         }
         else if (params.fractal_type == 6) { // Sierpinski
             if (ImGui::CollapsingHeader("Sierpinski Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
-                changed |= ImGui::SliderFloat("Scale", &params.sierpinski_scale, 1.5f, 3.0f);
+                changed |= ImGui::SliderFloat("Scale##Sierpinski", &params.sierpinski_scale, 1.5f, 3.0f);
             }
         }
         
@@ -1509,6 +1720,7 @@ int main(int argc, char** argv) {
             changed |= ImGui::SliderInt("Max Iterations", &params.max_iter, 10, 200);
             changed |= ImGui::SliderInt("Step Count (Ray March)", &params.max_steps, 1000, 50000, "%d steps");
             changed |= ImGui::SliderFloat("Step Size", &params.step_size, 0.0001f, 0.01f, "%.4f");
+            changed |= ImGui::SliderFloat("Max Distance", &params.dist_max, 1.0f, 50.0f);
             changed |= ImGui::SliderFloat("Escape", &params.escape, 1.0f, 100.0f);
             changed |= ImGui::SliderFloat("Scale", &params.scale, 0.1f, 5.0f);
             changed |= ImGui::SliderFloat("Del Less", &params.del_less, 0.0f, 50.0f);
@@ -1517,6 +1729,43 @@ int main(int argc, char** argv) {
         }
         
         if (ImGui::CollapsingHeader("Color Ramp", ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Color mode selector
+            const char* color_modes[] = { "Iteration", "Orbit Trap", "Combined" };
+            changed |= ImGui::Combo("Color Mode##ColorRamp", &params.color_mode, color_modes, 3);
+            
+            // Color range input boxes (more precise than sliders for small values)
+            if (params.color_mode == 0) {
+                // Iteration mode - use del_less/del_greater range as default
+                ImGui::TextDisabled("Color Range (Iteration):");
+            } else if (params.color_mode == 1) {
+                // Orbit trap mode
+                ImGui::TextDisabled("Color Range (Orbit Trap):");
+            } else {
+                ImGui::TextDisabled("Color Range (Combined):");
+            }
+            
+            ImGui::PushItemWidth(100);
+            ImGui::Text("Min:"); ImGui::SameLine();
+            changed |= ImGui::InputFloat("##ColorMin", &params.color_min, 0.0f, 0.0f, "%.4f");
+            ImGui::SameLine();
+            ImGui::Text("Max:"); ImGui::SameLine();
+            changed |= ImGui::InputFloat("##ColorMax", &params.color_max, 0.0f, 0.0f, "%.4f");
+            ImGui::PopItemWidth();
+            
+            if (ImGui::Button("Match to Band Range")) {
+                params.color_min = params.del_less;
+                params.color_max = params.del_greater;
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset Color Range")) {
+                params.color_min = 0.0f;
+                params.color_max = 100.0f;
+                changed = true;
+            }
+            
+            ImGui::Separator();
+            
             draw_color_ramp(params.color_ramp, params.del_less, params.del_greater, changed);
             
             // Reset button and Preset dropdown
@@ -1807,7 +2056,10 @@ int main(int argc, char** argv) {
             ImGui::InputText("Filename", project_filename, sizeof(project_filename));
             if (ImGui::Button("Load", ImVec2(120, 0))) {
                 if (load_project(proj, project_filename)) {
-                    params = interpolate_params(proj, proj.current_frame);
+                    if (!proj.keyframes.empty()) {
+                        params = interpolate_params(proj, proj.current_frame);
+                    }
+                    // If no keyframes, keep current params
                     needs_render = true;
                     show_load_modal = false;
                     ImGui::CloseCurrentPopup();
@@ -1846,6 +2098,7 @@ int main(int argc, char** argv) {
     
     clReleaseMemObject(cl_ctx.color_buffer);
     clReleaseMemObject(cl_ctx.depth_buffer);
+    clReleaseMemObject(cl_ctx.debug_buffer);
     clReleaseKernel(cl_ctx.kernel);
     clReleaseProgram(cl_ctx.program);
     clReleaseCommandQueue(cl_ctx.queue);

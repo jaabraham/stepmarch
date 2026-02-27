@@ -219,7 +219,7 @@ struct ColorRamp {
 };
 
 // Parameter structure (defined here for animation system)
-typedef struct {
+struct Params {
     // Camera
     float cx, cy, cz;
     float tx, ty, tz;
@@ -254,41 +254,140 @@ typedef struct {
     float mandelbox_folding;
     // Apollonian
     float apollonian_scale;
+    float apollonian_offset;
+    float apollonian_power;
     // Menger
     float menger_scale;
     // Sierpinski
     float sierpinski_scale;
+    // Color mode for choosing coloring attribute
+    int color_mode;
+    // Color range for mapping attribute to color ramp
+    float color_min;
+    float color_max;
     // Color ramp for iteration-based coloring
     ColorRamp color_ramp;
     // Material properties
     float specular_intensity;  // 0.0 to 2.0
     float shininess;           // 1.0 to 128.0
     int metallic;              // 0 = dielectric, 1 = metallic
-} Params;
-
-// Single keyframe - stores all parameters at a specific frame
-struct Keyframe {
-    int frame;
-    Params params;
     
-    // Bezier handles for smooth interpolation
-    float tangent_in[30];   // Sized for all params
-    float tangent_out[30];  // Sized for all params
+    // Default constructor - ensure color ramp is initialized
+    Params() {
+        color_ramp.init_default();
+    }
+    
+    // Copy constructor - ensure all fields are copied correctly
+    Params(const Params& other) {
+        cx = other.cx; cy = other.cy; cz = other.cz;
+        tx = other.tx; ty = other.ty; tz = other.tz;
+        fov = other.fov;
+        lx = other.lx; ly = other.ly; lz = other.lz;
+        lradius = other.lradius;
+        offsetx = other.offsetx; offsety = other.offsety; offsetz = other.offsetz;
+        scale = other.scale;
+        max_iter = other.max_iter;
+        escape = other.escape;
+        step_size = other.step_size;
+        dist_max = other.dist_max;
+        del_less = other.del_less;
+        del_greater = other.del_greater;
+        hollow = other.hollow;
+        seed_offset = other.seed_offset;
+        max_steps = other.max_steps;
+        floor_y = other.floor_y;
+        floor_enable = other.floor_enable;
+        checker_size = other.checker_size;
+        fractal_type = other.fractal_type;
+        julia_cx = other.julia_cx; julia_cy = other.julia_cy; julia_cz = other.julia_cz;
+        mandelbulb_power = other.mandelbulb_power;
+        mandelbox_scale = other.mandelbox_scale;
+        mandelbox_folding = other.mandelbox_folding;
+        apollonian_scale = other.apollonian_scale;
+        apollonian_offset = other.apollonian_offset;
+        apollonian_power = other.apollonian_power;
+        menger_scale = other.menger_scale;
+        sierpinski_scale = other.sierpinski_scale;
+        color_mode = other.color_mode;
+        color_min = other.color_min;
+        color_max = other.color_max;
+        specular_intensity = other.specular_intensity;
+        shininess = other.shininess;
+        metallic = other.metallic;
+        
+        // Copy color ramp
+        color_ramp.num_stops = other.color_ramp.num_stops;
+        for (int i = 0; i < MAX_RAMP_STOPS; i++) {
+            color_ramp.positions[i] = other.color_ramp.positions[i];
+            color_ramp.colors[i][0] = other.color_ramp.colors[i][0];
+            color_ramp.colors[i][1] = other.color_ramp.colors[i][1];
+            color_ramp.colors[i][2] = other.color_ramp.colors[i][2];
+            color_ramp.interp_modes[i] = other.color_ramp.interp_modes[i];
+        }
+        for (int i = 0; i < 64; i++) {
+            color_ramp.name[i] = other.color_ramp.name[i];
+        }
+    }
+    
+    // Explicit copy assignment to ensure ColorRamp is copied correctly
+    Params& operator=(const Params& other) {
+        if (this != &other) {
+            // Copy all scalar fields
+            cx = other.cx; cy = other.cy; cz = other.cz;
+            tx = other.tx; ty = other.ty; tz = other.tz;
+            fov = other.fov;
+            lx = other.lx; ly = other.ly; lz = other.lz;
+            lradius = other.lradius;
+            offsetx = other.offsetx; offsety = other.offsety; offsetz = other.offsetz;
+            scale = other.scale;
+            max_iter = other.max_iter;
+            escape = other.escape;
+            step_size = other.step_size;
+            dist_max = other.dist_max;
+            del_less = other.del_less;
+            del_greater = other.del_greater;
+            hollow = other.hollow;
+            seed_offset = other.seed_offset;
+            max_steps = other.max_steps;
+            floor_y = other.floor_y;
+            floor_enable = other.floor_enable;
+            checker_size = other.checker_size;
+            fractal_type = other.fractal_type;
+            julia_cx = other.julia_cx; julia_cy = other.julia_cy; julia_cz = other.julia_cz;
+            mandelbulb_power = other.mandelbulb_power;
+            mandelbox_scale = other.mandelbox_scale;
+            mandelbox_folding = other.mandelbox_folding;
+            apollonian_scale = other.apollonian_scale;
+            apollonian_offset = other.apollonian_offset;
+            apollonian_power = other.apollonian_power;
+            menger_scale = other.menger_scale;
+            sierpinski_scale = other.sierpinski_scale;
+            color_mode = other.color_mode;
+            color_min = other.color_min;
+            color_max = other.color_max;
+            specular_intensity = other.specular_intensity;
+            shininess = other.shininess;
+            metallic = other.metallic;
+            
+            // Explicitly copy color ramp
+            color_ramp.num_stops = other.color_ramp.num_stops;
+            for (int i = 0; i < MAX_RAMP_STOPS; i++) {
+                color_ramp.positions[i] = other.color_ramp.positions[i];
+                color_ramp.colors[i][0] = other.color_ramp.colors[i][0];
+                color_ramp.colors[i][1] = other.color_ramp.colors[i][1];
+                color_ramp.colors[i][2] = other.color_ramp.colors[i][2];
+                color_ramp.interp_modes[i] = other.color_ramp.interp_modes[i];
+            }
+            for (int i = 0; i < 64; i++) {
+                color_ramp.name[i] = other.color_ramp.name[i];
+            }
+        }
+        return *this;
+    }
 };
 
-// Animation project
-struct AnimationProject {
-    std::string name;
-    int start_frame = 1;
-    int end_frame = 250;
-    int current_frame = 1;
-    std::vector<Keyframe> keyframes;
-    
-    // Resolution for animation renders
-    int render_width = 1920;
-    int render_height = 1080;
-    std::string output_pattern = "output/frame_%04d.png";
-};
+// Animation project (forward declaration - defined after Keyframe)
+struct AnimationProject;
 
 // Default params helper
 inline Params default_params() {
@@ -327,10 +426,17 @@ inline Params default_params() {
     p.mandelbox_folding = 1.0f;
     // Apollonian defaults
     p.apollonian_scale = 3.0f;
+    p.apollonian_offset = 0.0f;
+    p.apollonian_power = 1.0f;
     // Menger defaults
     p.menger_scale = 3.0f;
     // Sierpinski defaults
     p.sierpinski_scale = 2.0f;
+    // Color mode default (iteration-based)
+    p.color_mode = 0;
+    // Color range defaults
+    p.color_min = 0.0f;
+    p.color_max = 100.0f;
     // Color ramp default
     p.color_ramp.init_default();
     // Material defaults
@@ -377,11 +483,16 @@ inline float get_param_value(const Params& p, int idx) {
         case 31: return p.mandelbox_scale;
         case 32: return p.mandelbox_folding;
         case 33: return p.apollonian_scale;
-        case 34: return p.menger_scale;
-        case 35: return p.sierpinski_scale;
-        case 36: return p.specular_intensity;
-        case 37: return p.shininess;
-        case 38: return (float)p.metallic;
+        case 34: return p.apollonian_offset;
+        case 35: return p.apollonian_power;
+        case 36: return p.menger_scale;
+        case 37: return p.sierpinski_scale;
+        case 38: return p.specular_intensity;
+        case 39: return p.shininess;
+        case 40: return (float)p.metallic;
+        case 41: return (float)p.color_mode;
+        case 42: return p.color_min;
+        case 43: return p.color_max;
         default: return 0.0f;
     }
 }
@@ -423,15 +534,44 @@ inline void set_param_value(Params& p, int idx, float val) {
         case 31: p.mandelbox_scale = val; break;
         case 32: p.mandelbox_folding = val; break;
         case 33: p.apollonian_scale = val; break;
-        case 34: p.menger_scale = val; break;
-        case 35: p.sierpinski_scale = val; break;
-        case 36: p.specular_intensity = val; break;
-        case 37: p.shininess = val; break;
-        case 38: p.metallic = (int)val; break;
+        case 34: p.apollonian_offset = val; break;
+        case 35: p.apollonian_power = val; break;
+        case 36: p.menger_scale = val; break;
+        case 37: p.sierpinski_scale = val; break;
+        case 38: p.specular_intensity = val; break;
+        case 39: p.shininess = val; break;
+        case 40: p.metallic = (int)val; break;
+        case 41: p.color_mode = (int)val; break;
+        case 42: p.color_min = val; break;
+        case 43: p.color_max = val; break;
     }
 }
 
-#define PARAM_COUNT 39
+#define PARAM_COUNT 44
+
+// Single keyframe - stores all parameters at a specific frame
+struct Keyframe {
+    int frame;
+    Params params;
+    
+    // Bezier handles for smooth interpolation
+    float tangent_in[PARAM_COUNT];   // Sized for all params
+    float tangent_out[PARAM_COUNT];  // Sized for all params
+};
+
+// Animation project
+struct AnimationProject {
+    std::string name;
+    int start_frame = 1;
+    int end_frame = 250;
+    int current_frame = 1;
+    std::vector<Keyframe> keyframes;
+    
+    // Resolution for animation renders
+    int render_width = 1920;
+    int render_height = 1080;
+    std::string output_pattern = "output/frame_%04d.png";
+};
 
 // Smooth step interpolation (ease in/out)
 inline float smoothstep(float t) {
@@ -451,7 +591,14 @@ inline int find_keyframe_index(const std::vector<Keyframe>& keyframes, int frame
     return result;
 }
 
-// Interpolate parameters at a given frame
+// Cubic Bezier interpolation
+// p0 = start value, p1 = control point out, p2 = control point in, p3 = end value
+inline float bezier_interp(float t, float p0, float p1, float p2, float p3) {
+    float u = 1.0f - t;
+    return u*u*u * p0 + 3.0f*u*u*t * p1 + 3.0f*u*t*t * p2 + t*t*t * p3;
+}
+
+// Interpolate parameters at a given frame using Bezier curves
 inline Params interpolate_params(const AnimationProject& proj, int frame) {
     int k1_idx = find_keyframe_index(proj.keyframes, frame);
     
@@ -468,23 +615,59 @@ inline Params interpolate_params(const AnimationProject& proj, int frame) {
     const Keyframe& k1 = proj.keyframes[k1_idx];
     const Keyframe& k2 = proj.keyframes[k1_idx + 1];
     
-    // Calculate interpolation factor
+    // Calculate interpolation factor (0 to 1)
     float t = 0.0f;
     if (k2.frame > k1.frame) {
         t = (float)(frame - k1.frame) / (float)(k2.frame - k1.frame);
     }
     
-    // Apply smoothstep for ease in/out
-    t = smoothstep(t);
+    // Start with k1's params (including color ramp), then interpolate scalars
+    Params result = k1.params;
     
-    // Interpolate all parameters
-    Params result;
+    // Integer parameter indices that should NOT be interpolated
+    // 15=max_iter, 21=hollow, 22=seed_offset, 24=floor_enable, 26=fractal_type, 40=metallic, 41=color_mode
+    bool is_integer_param[PARAM_COUNT] = {false};
+    is_integer_param[15] = true;  // max_iter
+    is_integer_param[21] = true;  // hollow
+    is_integer_param[22] = true;  // seed_offset
+    is_integer_param[24] = true;  // floor_enable
+    is_integer_param[26] = true;  // fractal_type - IMPORTANT: don't interpolate this!
+    is_integer_param[40] = true;  // metallic
+    is_integer_param[41] = true;  // color_mode
+    
+    // Interpolate all scalar parameters using Bezier curves
     for (int i = 0; i < PARAM_COUNT; i++) {
-        float v1 = get_param_value(k1.params, i);
-        float v2 = get_param_value(k2.params, i);
-        float val = v1 + (v2 - v1) * t;
+        // Skip integer/discrete parameters - keep value from first keyframe
+        if (is_integer_param[i]) {
+            continue;
+        }
+        
+        float p0 = get_param_value(k1.params, i);
+        float p3 = get_param_value(k2.params, i);
+        
+        // Calculate control points based on tangents
+        // tangent_out from k1, tangent_in to k2
+        float tan_out = k1.tangent_out[i];
+        float tan_in = k2.tangent_in[i];
+        
+        // Control points are relative to the keyframe values
+        float p1 = p0 + tan_out;
+        float p2 = p3 - tan_in;
+        
+        // Apply Bezier interpolation
+        float val = bezier_interp(t, p0, p1, p2, p3);
         set_param_value(result, i, val);
     }
+    
+    // Explicitly preserve integer/discrete parameters from first keyframe
+    // ( safeguard in case interpolation somehow affected them )
+    result.fractal_type = k1.params.fractal_type;
+    result.max_iter = k1.params.max_iter;
+    result.hollow = k1.params.hollow;
+    result.seed_offset = k1.params.seed_offset;
+    result.floor_enable = k1.params.floor_enable;
+    result.metallic = k1.params.metallic;
+    result.color_mode = k1.params.color_mode;
     
     return result;
 }
@@ -494,6 +677,7 @@ inline void set_keyframe(AnimationProject& proj, int frame, const Params& params
     // Check if exists
     for (auto& kf : proj.keyframes) {
         if (kf.frame == frame) {
+            // Explicitly copy color ramp to ensure it's preserved
             kf.params = params;
             return;
         }
@@ -502,8 +686,9 @@ inline void set_keyframe(AnimationProject& proj, int frame, const Params& params
     // Insert new keyframe
     Keyframe kf;
     kf.frame = frame;
+    // Explicitly copy all params including color ramp
     kf.params = params;
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < PARAM_COUNT; i++) {
         kf.tangent_in[i] = 0.0f;
         kf.tangent_out[i] = 0.0f;
     }
@@ -615,7 +800,7 @@ inline bool load_project(AnimationProject& proj, const char* filename) {
             // Initialize with defaults for new fields not in old files
             current_kf.params = default_params();
             sscanf(line + 9, "%d", &current_kf.frame);
-            for (int i = 0; i < 30; i++) {
+            for (int i = 0; i < PARAM_COUNT; i++) {
                 current_kf.tangent_in[i] = 0.0f;
                 current_kf.tangent_out[i] = 0.0f;
             }
@@ -728,7 +913,7 @@ inline bool save_default_scene(const Params& p) {
     
     // Apollonian params
     fprintf(f, "\n# Apollonian Parameters\n");
-    fprintf(f, "APOLLONIAN %.6f\n", p.apollonian_scale);
+    fprintf(f, "APOLLONIAN %.6f %.6f %.6f\n", p.apollonian_scale, p.apollonian_offset, p.apollonian_power);
     
     // Menger params
     fprintf(f, "\n# Menger Parameters\n");
@@ -737,6 +922,10 @@ inline bool save_default_scene(const Params& p) {
     // Sierpinski params
     fprintf(f, "\n# Sierpinski Parameters\n");
     fprintf(f, "SIERPINSKI %.6f\n", p.sierpinski_scale);
+    
+    // Color mode and range
+    fprintf(f, "\n# Color Mode (0=iteration, 1=orbit trap, 2=combined)\n");
+    fprintf(f, "COLOR_MODE %d %.6f %.6f\n", p.color_mode, p.color_min, p.color_max);
     
     // Color ramp
     fprintf(f, "\n# Color Ramp\n");
@@ -804,11 +993,13 @@ inline bool load_default_scene(Params& p) {
         } else if (strncmp(line, "MANDELBOX ", 10) == 0) {
             sscanf(line + 10, "%f %f", &p.mandelbox_scale, &p.mandelbox_folding);
         } else if (strncmp(line, "APOLLONIAN ", 11) == 0) {
-            sscanf(line + 11, "%f", &p.apollonian_scale);
+            sscanf(line + 11, "%f %f %f", &p.apollonian_scale, &p.apollonian_offset, &p.apollonian_power);
         } else if (strncmp(line, "MENGER ", 7) == 0) {
             sscanf(line + 7, "%f", &p.menger_scale);
         } else if (strncmp(line, "SIERPINSKI ", 11) == 0) {
             sscanf(line + 11, "%f", &p.sierpinski_scale);
+        } else if (strncmp(line, "COLOR_MODE ", 11) == 0) {
+            sscanf(line + 11, "%d %f %f", &p.color_mode, &p.color_min, &p.color_max);
         } else if (strncmp(line, "MATERIAL ", 10) == 0) {
             sscanf(line + 10, "%f %f %d", &p.specular_intensity, &p.shininess, &p.metallic);
         } else if (strncmp(line, "COLOR_RAMP ", 11) == 0) {

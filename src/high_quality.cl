@@ -241,35 +241,41 @@ inline FractalData get_julia_3d(float3 z, float3 c, int max_iter, float escape_s
 inline FractalData get_mandelbulb(float3 pos, int max_iter, float bailout, float power) {
     FractalData data;
     float3 z = pos;
-    float dr = 1.0f;
-    float r = 0.0f;
     float min_dist = 1e10f;
     
     for (int i = 0; i < max_iter; i++) {
-        r = length3(z);
+        float r = length3(z);
         min_dist = fmin(min_dist, r);
         
-        if (r > bailout) break;
+        // Point escaped - return iteration count with smooth iteration
+        if (r > bailout) {
+            // Smooth iteration formula for coloring
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(bailout)) / log(power);
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
+        }
         
-        float theta = acos(z.z / r);
+        // Convert to spherical coordinates
+        float theta = acos(clamp(z.z / r, -1.0f, 1.0f));
         float phi = atan2(z.y, z.x);
         
+        // Apply power (z = z^power)
         float zr = pow(r, power);
         theta = theta * power;
         phi = phi * power;
         
+        // Convert back to Cartesian and add c (pos)
         float sint = sin(theta);
         z = (float3)(
             sint * cos(phi),
             sint * sin(phi),
             cos(theta)
         ) * zr + pos;
-        
-        dr = pow(r, power - 1.0f) * power * dr + 1.0f;
     }
     
-    float dist = 0.5f * log(r) * r / dr;
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(r);
+    // Point didn't escape - it's inside the set
+    data.iteration = (float)max_iter;
     data.trap = min_dist;
     return data;
 }
@@ -279,29 +285,43 @@ inline FractalData get_mandelbox(float3 pos, int max_iter, float box_scale, floa
     float3 z = pos;
     float3 offset = z;
     float min_dist = 1e10f;
-    float dr = 1.0f;
+    
+    // Fixed radius values for sphere fold
+    const float min_radius = 0.5f;
+    const float fixed_radius = 1.0f;
     
     for (int i = 0; i < max_iter; i++) {
         float r = length3(z);
         min_dist = fmin(min_dist, r);
         
-        z = clamp(z, -folding_limit, folding_limit) * 2.0f - z;
-        
-        r = length3(z);
-        if (r < 0.5f) {
-            z *= 4.0f;
-            dr *= 4.0f;
-        } else if (r < 1.0f) {
-            z /= (r * r);
-            dr /= (r * r);
+        // Escape condition: if point gets too far from origin
+        if (r > 100.0f) {
+            // Smooth iteration for coloring
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(fabs(box_scale));
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
         }
         
+        // Box fold: reflect z into [-folding_limit, folding_limit]
+        z = clamp(z, -folding_limit, folding_limit) * 2.0f - z;
+        
+        // Sphere fold
+        r = length3(z);
+        if (r < min_radius) {
+            // Inside inner radius: scale up
+            z *= (fixed_radius / min_radius);
+        } else if (r < fixed_radius) {
+            // Between min and fixed radius: scale based on distance
+            z *= (fixed_radius / r);
+        }
+        
+        // Scale and add offset (the "mandelbox" part: z = scale * folded(z) + c)
         z = z * box_scale + offset;
-        dr = dr * fabs(box_scale) + 1.0f;
     }
     
-    float r = length3(z);
-    data.iteration = (r < 100.0f) ? (float)max_iter : log(r);
+    // Point didn't escape - inside the set
+    data.iteration = (float)max_iter;
     data.trap = min_dist;
     return data;
 }
@@ -310,83 +330,123 @@ inline float3 fract3(float3 x) {
     return x - floor(x);
 }
 
-inline float apollonian_sdf(float3 p, int iterations, float apo_scale) {
+inline float apollonian_sdf(float3 p, int iterations, float apo_scale, float apo_offset, float apo_power) {
     float s = 1.0f;
+    float3 z = p;
+    
+    // Apply offset to shift the folding center
+    z += (float3)(apo_offset);
+    
     for (int i = 0; i < iterations; i++) {
-        p = -1.0f + 2.0f * fract3(0.5f * p + 0.5f);
-        float r2 = dot3(p, p);
-        float k = apo_scale / r2;
-        if (r2 < 0.0001f) break;
-        p *= k;
+        z = -1.0f + 2.0f * fract3(0.5f * z + 0.5f);
+        float r2 = dot3(z, z);
+        if (r2 < 0.000001f) break;
+        // Sphere inversion with power parameter
+        float k = native_powr(apo_scale / r2, apo_power);
+        z *= k;
         s *= k;
     }
-    return length3(p) / s;
+    return length3(z) / s;
 }
 
-inline FractalData get_apollonian(float3 pos, int max_iter, float apo_scale) {
+inline FractalData get_apollonian(float3 pos, int max_iter, float apo_scale, float apo_offset, float apo_power) {
     FractalData data;
-    float dist = apollonian_sdf(pos, max_iter, apo_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
-    return data;
-}
-
-inline float menger_sdf(float3 p, int iterations, float menger_scale) {
-    float3 z = p;
-    float s = 1.0f;
-    for (int i = 0; i < iterations; i++) {
-        z = clamp(z, -1.0f, 1.0f) * 2.0f - z;
-        z *= menger_scale;
-        s *= menger_scale;
-        z = (float3)(
-            copysign(fmin(fabs(z.x), 1.0f), z.x),
-            copysign(fmin(fabs(z.y), 1.0f), z.y),
-            copysign(fmin(fabs(z.z), 1.0f), z.z)
-        );
+    float dist = apollonian_sdf(pos, max_iter, apo_scale, apo_offset, apo_power);
+    
+    float surface_thickness = 0.005f;
+    
+    if (dist < surface_thickness) {
+        data.iteration = (float)max_iter;
+    } else {
+        data.iteration = 0.0f;
     }
-    float r = length3(z);
-    return (r - 1.5f) / s;
+    
+    data.trap = fabs(dist);
+    return data;
 }
 
 inline FractalData get_menger(float3 pos, int max_iter, float menger_scale) {
     FractalData data;
-    float dist = menger_sdf(pos, max_iter, menger_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
+    float3 z = pos;
+    float min_dist = 1e10f;
+    
+    for (int i = 0; i < max_iter; i++) {
+        float r = length3(z);
+        min_dist = fmin(min_dist, r);
+        
+        // Escape condition
+        if (r > 100.0f) {
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(menger_scale);
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
+        }
+        
+        // Box fold to [-1, 1]
+        z = clamp(z, -1.0f, 1.0f) * 2.0f - z;
+        
+        // Menger: sort coordinates and fold to corner
+        float3 a = fabs(z);
+        if (a.x < a.y) {
+            float tmp = a.x; a.x = a.y; a.y = tmp;
+        }
+        if (a.y < a.z) {
+            float tmp = a.y; a.y = a.z; a.z = tmp;
+        }
+        if (a.x < a.y) {
+            float tmp = a.x; a.x = a.y; a.y = tmp;
+        }
+        
+        // Scale and translate
+        z = z * menger_scale - (menger_scale - 1.0f);
+    }
+    
+    data.iteration = (float)max_iter;
+    data.trap = min_dist;
     return data;
 }
 
-inline float sierpinski_sdf(float3 p, int iterations, float sierpinski_scale) {
-    float3 z = p;
-    float s = 1.0f;
+inline FractalData get_sierpinski(float3 pos, int max_iter, float sierpinski_scale) {
+    FractalData data;
+    float3 z = pos;
+    float min_dist = 1e10f;
+    
     float3 a = (float3)(1.0f, 1.0f, 1.0f);
     float3 b = (float3)(-1.0f, -1.0f, 1.0f);
     float3 c = (float3)(-1.0f, 1.0f, -1.0f);
     float3 d = (float3)(1.0f, -1.0f, -1.0f);
     
-    for (int i = 0; i < iterations; i++) {
+    for (int i = 0; i < max_iter; i++) {
+        float r = length3(z);
+        min_dist = fmin(min_dist, r);
+        
+        // Escape condition
+        if (r > 100.0f) {
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(sierpinski_scale);
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
+        }
+        
+        // Find closest vertex
         float3 vertices[4] = {a, b, c, d};
-        float min_dist = 1e10f;
+        float min_vdist = 1e10f;
         int closest = 0;
+        
         for (int v = 0; v < 4; v++) {
-            float dist = length3(z - vertices[v]);
-            if (dist < min_dist) {
-                min_dist = dist;
+            float vdist = length3(z - vertices[v]);
+            if (vdist < min_vdist) {
+                min_vdist = vdist;
                 closest = v;
             }
         }
+        
+        // Scale towards closest vertex
         z = (z - vertices[closest]) * sierpinski_scale + vertices[closest];
-        s *= sierpinski_scale;
     }
-    float r = length3(z);
-    return (r - 1.5f) / s;
-}
-
-inline FractalData get_sierpinski(float3 pos, int max_iter, float sierpinski_scale) {
-    FractalData data;
-    float dist = sierpinski_sdf(pos, max_iter, sierpinski_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
+    
+    data.iteration = (float)max_iter;
+    data.trap = min_dist;
     return data;
 }
 
@@ -395,7 +455,7 @@ inline FractalData get_fractal_data(
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power,
     float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power,
     float menger_scale,
     float sierpinski_scale
 ) {
@@ -409,7 +469,7 @@ inline FractalData get_fractal_data(
         case FRACTAL_MANDELBOX:
             return get_mandelbox(pos, max_iter, mandelbox_scale, mandelbox_folding);
         case FRACTAL_APOLLONIAN:
-            return get_apollonian(pos, max_iter, apollonian_scale);
+            return get_apollonian(pos, max_iter, apollonian_scale, apollonian_offset, apollonian_power);
         case FRACTAL_MENGER:
             return get_menger(pos, max_iter, menger_scale);
         case FRACTAL_SIERPINSKI:
@@ -424,7 +484,7 @@ inline bool is_point_solid(
     float d_less, float d_greater, int hollow_mode, float cut_z,
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power, float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale, float menger_scale, float sierpinski_scale
+    float apollonian_scale, float apollonian_offset, float apollonian_power, float menger_scale, float sierpinski_scale
 ) {
     if (p.z > cut_z) return false;
     
@@ -432,7 +492,7 @@ inline bool is_point_solid(
         p, fractal_type, max_iter, sqrt(esc2),
         julia_cx, julia_cy, julia_cz,
         mandelbulb_power, mandelbox_scale, mandelbox_folding,
-        apollonian_scale, menger_scale, sierpinski_scale
+        apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale
     );
     
     if (hollow_mode == 1 && fd.iteration >= (float)max_iter - 0.001f) return false;
@@ -450,6 +510,7 @@ typedef struct {
     float3 normal;
     int material;  // 0 = fractal, 1 = floor
     float iteration;
+    float trap;    // Orbit trap value for coloring
 } HitResult;
 
 inline float3 compute_normal(
@@ -458,14 +519,14 @@ inline float3 compute_normal(
     float d_less, float d_greater, int hollow_mode, float cut_z,
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power, float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale, float menger_scale, float sierpinski_scale
+    float apollonian_scale, float apollonian_offset, float apollonian_power, float menger_scale, float sierpinski_scale
 ) {
     float h = EPSILON;
     float3 n;
     
     #define GET_SOLID(p) is_point_solid(p, fractal_type, max_iter, esc2, d_less, d_greater, \
         hollow_mode, cut_z, julia_cx, julia_cy, julia_cz, mandelbulb_power, \
-        mandelbox_scale, mandelbox_folding, apollonian_scale, menger_scale, sierpinski_scale)
+        mandelbox_scale, mandelbox_folding, apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale)
     
     n.x = GET_SOLID(pos + (float3)(h,0,0)) ? 1.0f : 0.0f;
     n.x -= GET_SOLID(pos - (float3)(h,0,0)) ? 1.0f : 0.0f;
@@ -485,7 +546,7 @@ inline int ray_march(
     float d_less, float d_greater, int hollow, float cut_z,
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power, float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale, float menger_scale, float sierpinski_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power, float menger_scale, float sierpinski_scale,
     float floor_y, int floor_enable,
     float dt, float t_max,
     HitResult* hit
@@ -506,7 +567,7 @@ inline int ray_march(
         if (is_point_solid(p, fractal_type, max_iter, esc2, d_less, d_greater,
                           hollow, cut_z, julia_cx, julia_cy, julia_cz,
                           mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                          apollonian_scale, menger_scale, sierpinski_scale)) {
+                          apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale)) {
             // Binary refinement
             float t_low = t - dt;
             float t_high = t;
@@ -517,7 +578,7 @@ inline int ray_march(
                 if (is_point_solid(p_mid, fractal_type, max_iter, esc2, d_less, d_greater,
                                   hollow, cut_z, julia_cx, julia_cy, julia_cz,
                                   mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                                  apollonian_scale, menger_scale, sierpinski_scale))
+                                  apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale))
                     t_high = t_mid;
                 else
                     t_low = t_mid;
@@ -528,14 +589,15 @@ inline int ray_march(
                                           d_less, d_greater, hollow, cut_z,
                                           julia_cx, julia_cy, julia_cz,
                                           mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                                          apollonian_scale, menger_scale, sierpinski_scale);
+                                          apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale);
             if (dot3(hit->normal, rd) > 0.0f) hit->normal *= -1.0f;
             hit->material = 0;
             
             FractalData fd = get_fractal_data(hit->pos, fractal_type, max_iter, sqrt(esc2),
                 julia_cx, julia_cy, julia_cz, mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                apollonian_scale, menger_scale, sierpinski_scale);
+                apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale);
             hit->iteration = fd.iteration;
+            hit->trap = fd.trap;
             
             return 1;  // Hit fractal
         }
@@ -570,7 +632,7 @@ inline float calc_soft_shadow(
     float d_less, float d_greater, int hollow, float cut_z,
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power, float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale, float menger_scale, float sierpinski_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power, float menger_scale, float sierpinski_scale,
     float dt, uint* seed, int shadow_samples
 ) {
     if (shadow_samples <= 1) {
@@ -580,7 +642,7 @@ inline float calc_soft_shadow(
             if (is_point_solid(ro + rd * t, fractal_type, max_iter, esc2, d_less, d_greater,
                               hollow, cut_z, julia_cx, julia_cy, julia_cz,
                               mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                              apollonian_scale, menger_scale, sierpinski_scale)) {
+                              apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale)) {
                 return 0.0f;
             }
             t += dt * 0.5f;
@@ -607,7 +669,7 @@ inline float calc_soft_shadow(
             if (is_point_solid(ro + sample_dir * t, fractal_type, max_iter, esc2, d_less, d_greater,
                               hollow, cut_z, julia_cx, julia_cy, julia_cz,
                               mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                              apollonian_scale, menger_scale, sierpinski_scale)) {
+                              apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale)) {
                 sample_shadow = 0.0f;
                 break;
             }
@@ -625,7 +687,7 @@ inline float calc_ao(
     float d_less, float d_greater, int hollow, float cut_z,
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power, float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale, float menger_scale, float sierpinski_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power, float menger_scale, float sierpinski_scale,
     int ao_samples, uint* seed
 ) {
     float ao_sum = 0.0f;
@@ -649,7 +711,7 @@ inline float calc_ao(
                               d_less, d_greater, hollow, cut_z,
                               julia_cx, julia_cy, julia_cz,
                               mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                              apollonian_scale, menger_scale, sierpinski_scale)) {
+                              apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale)) {
                 sample_ao = (ao_dist / ao_range) * 0.5f;
                 break;
             }
@@ -734,7 +796,7 @@ __kernel void render_high_quality(
     // Mandelbox
     float mandelbox_scale, float mandelbox_folding,
     // Apollonian
-    float apollonian_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power,
     // Menger
     float menger_scale,
     // Sierpinski
@@ -747,6 +809,11 @@ __kernel void render_high_quality(
     float specular_intensity,
     float shininess,
     int metallic,
+    // Color mode (0=iteration, 1=orbit trap, 2=combined)
+    int color_mode,
+    // Color range
+    float color_min,
+    float color_max,
     // Color ramp
     int ramp_num_stops,
     float ramp_pos0, float ramp_pos1, float ramp_pos2, float ramp_pos3,
@@ -841,22 +908,34 @@ __kernel void render_high_quality(
                                      del_less, del_greater, hollow, cut_z,
                                      julia_cx, julia_cy, julia_cz,
                                      mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                                     apollonian_scale, menger_scale, sierpinski_scale,
+                                     apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale,
                                      floor_y_scaled, floor_enable,
                                      dt, t_max, &hit);
             
             float3 sample_color;
             
             if (hit_type == 0) {
-                // Background
-                float t_bg = 0.5f * (rd.y + 1.0f);
-                sample_color = mix3((float3)(1.0f, 1.0f, 1.0f), (float3)(0.5f, 0.7f, 1.0f), t_bg);
+                // Black background
+                sample_color = (float3)(0.0f, 0.0f, 0.0f);
             } else {
                 // Get base color
                 float3 base_color;
                 if (hit.material == 0) {
-                    // Fractal
-                    float t = (hit.iteration - del_less) / (del_greater - del_less);
+                    // Fractal - choose coloring attribute based on color_mode
+                    float color_value;
+                    if (color_mode == 0) {
+                        // Iteration-based
+                        color_value = hit.iteration;
+                    } else if (color_mode == 1) {
+                        // Orbit trap
+                        color_value = hit.trap;
+                    } else {
+                        // Combined
+                        float iter_norm = hit.iteration / (float)max_iter;
+                        float trap_norm = fmin(hit.trap / 10.0f, 1.0f);
+                        color_value = (iter_norm + trap_norm) * 0.5f * (float)max_iter;
+                    }
+                    float t = (color_value - color_min) / (color_max - color_min);
                     t = clamp(t, 0.0f, 1.0f);
                     base_color = sample_color_ramp(t, ramp_num_stops, ramp_positions,
                                                    ramp_colors_r, ramp_colors_g, ramp_colors_b,
@@ -876,7 +955,7 @@ __kernel void render_high_quality(
                     hit.pos + hit.normal * dt * 2.0f, light_dir, dt * 2.0f, light_dist, light_radius,
                     fractal_type, max_iter, esc2, del_less, del_greater, hollow, cut_z,
                     julia_cx, julia_cy, julia_cz, mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                    apollonian_scale, menger_scale, sierpinski_scale, dt, &seed, shadow_samples
+                    apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale, dt, &seed, shadow_samples
                 );
                 
                 // Ambient occlusion
@@ -885,7 +964,7 @@ __kernel void render_high_quality(
                     ao = calc_ao(hit.pos, hit.normal, dt, fractal_type, max_iter, esc2,
                                  del_less, del_greater, hollow, cut_z,
                                  julia_cx, julia_cy, julia_cz, mandelbulb_power, mandelbox_scale, mandelbox_folding,
-                                 apollonian_scale, menger_scale, sierpinski_scale, ao_samples, &seed);
+                                 apollonian_scale, apollonian_offset, apollonian_power, menger_scale, sierpinski_scale, ao_samples, &seed);
                 }
                 
                 // Diffuse

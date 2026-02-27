@@ -180,29 +180,43 @@ inline FractalData get_mandelbox(float3 pos, int max_iter, float box_scale, floa
     float3 z = pos;
     float3 offset = z;
     float min_dist = 1e10f;
-    float dr = 1.0f;
+    
+    // Fixed radius values for sphere fold
+    const float min_radius = 0.5f;
+    const float fixed_radius = 1.0f;
     
     for (int i = 0; i < max_iter; i++) {
         float r = length3(z);
         min_dist = fmin(min_dist, r);
         
-        z = clamp(z, -folding_limit, folding_limit) * 2.0f - z;
-        
-        r = length3(z);
-        if (r < 0.5f) {
-            z *= 4.0f;
-            dr *= 4.0f;
-        } else if (r < 1.0f) {
-            z /= (r * r);
-            dr /= (r * r);
+        // Escape condition: if point gets too far from origin
+        if (r > 100.0f) {
+            // Smooth iteration for coloring
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(fabs(box_scale));
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
         }
         
+        // Box fold: reflect z into [-folding_limit, folding_limit]
+        z = clamp(z, -folding_limit, folding_limit) * 2.0f - z;
+        
+        // Sphere fold
+        r = length3(z);
+        if (r < min_radius) {
+            // Inside inner radius: scale up
+            z *= (fixed_radius / min_radius);
+        } else if (r < fixed_radius) {
+            // Between min and fixed radius: scale based on distance
+            z *= (fixed_radius / r);
+        }
+        
+        // Scale and add offset (the "mandelbox" part: z = scale * folded(z) + c)
         z = z * box_scale + offset;
-        dr = dr * fabs(box_scale) + 1.0f;
     }
     
-    float r = length3(z);
-    data.iteration = (r < 100.0f) ? (float)max_iter : log(r);
+    // Point didn't escape - inside the set
+    data.iteration = (float)max_iter;
     data.trap = min_dist;
     return data;
 }
@@ -213,89 +227,117 @@ inline float3 fract3(float3 x) {
 
 inline float apollonian_sdf(float3 p, int iterations, float apo_scale) {
     float s = 1.0f;
+    float3 z = p;
     
     for (int i = 0; i < iterations; i++) {
-        p = -1.0f + 2.0f * fract3(0.5f * p + 0.5f);
-        float r2 = dot3(p, p);
+        z = -1.0f + 2.0f * fract3(0.5f * z + 0.5f);
+        float r2 = dot3(z, z);
+        if (r2 < 0.000001f) break;
         float k = apo_scale / r2;
-        if (r2 < 0.0001f) break;
-        p *= k;
+        z *= k;
         s *= k;
     }
-    
-    return length3(p) / s;
+    return length3(z) / s;
 }
 
 inline FractalData get_apollonian(float3 pos, int max_iter, float apo_scale) {
     FractalData data;
     float dist = apollonian_sdf(pos, max_iter, apo_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
-    return data;
-}
-
-inline float menger_sdf(float3 p, int iterations, float menger_scale) {
-    float3 z = p;
-    float s = 1.0f;
     
-    for (int i = 0; i < iterations; i++) {
-        z = clamp(z, -1.0f, 1.0f) * 2.0f - z;
-        z *= menger_scale;
-        s *= menger_scale;
-        z = (float3)(
-            copysign(fmin(fabs(z.x), 1.0f), z.x),
-            copysign(fmin(fabs(z.y), 1.0f), z.y),
-            copysign(fmin(fabs(z.z), 1.0f), z.z)
-        );
+    float surface_thickness = 0.005f;
+    
+    if (dist < surface_thickness) {
+        data.iteration = (float)max_iter;
+    } else {
+        data.iteration = 0.0f;
     }
     
-    float r = length3(z);
-    return (r - 1.5f) / s;
+    data.trap = fabs(dist);
+    return data;
 }
 
 inline FractalData get_menger(float3 pos, int max_iter, float menger_scale) {
     FractalData data;
-    float dist = menger_sdf(pos, max_iter, menger_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
+    float3 z = pos;
+    float min_dist = 1e10f;
+    
+    for (int i = 0; i < max_iter; i++) {
+        float r = length3(z);
+        min_dist = fmin(min_dist, r);
+        
+        // Escape condition
+        if (r > 100.0f) {
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(menger_scale);
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
+        }
+        
+        // Box fold to [-1, 1]
+        z = clamp(z, -1.0f, 1.0f) * 2.0f - z;
+        
+        // Menger: sort coordinates and fold to corner
+        float3 a = fabs(z);
+        if (a.x < a.y) {
+            float tmp = a.x; a.x = a.y; a.y = tmp;
+        }
+        if (a.y < a.z) {
+            float tmp = a.y; a.y = a.z; a.z = tmp;
+        }
+        if (a.x < a.y) {
+            float tmp = a.x; a.x = a.y; a.y = tmp;
+        }
+        
+        // Scale and translate
+        z = z * menger_scale - (menger_scale - 1.0f);
+    }
+    
+    data.iteration = (float)max_iter;
+    data.trap = min_dist;
     return data;
 }
 
-inline float sierpinski_sdf(float3 p, int iterations, float sierpinski_scale) {
-    float3 z = p;
-    float s = 1.0f;
+inline FractalData get_sierpinski(float3 pos, int max_iter, float sierpinski_scale) {
+    FractalData data;
+    float3 z = pos;
+    float min_dist = 1e10f;
     
     float3 a = (float3)(1.0f, 1.0f, 1.0f);
     float3 b = (float3)(-1.0f, -1.0f, 1.0f);
     float3 c = (float3)(-1.0f, 1.0f, -1.0f);
     float3 d = (float3)(1.0f, -1.0f, -1.0f);
     
-    for (int i = 0; i < iterations; i++) {
+    for (int i = 0; i < max_iter; i++) {
+        float r = length3(z);
+        min_dist = fmin(min_dist, r);
+        
+        // Escape condition
+        if (r > 100.0f) {
+            float smooth_iter = (float)i + 1.0f - log(log(r) / log(100.0f)) / log(sierpinski_scale);
+            data.iteration = smooth_iter;
+            data.trap = min_dist;
+            return data;
+        }
+        
+        // Find closest vertex
         float3 vertices[4] = {a, b, c, d};
-        float min_dist = 1e10f;
+        float min_vdist = 1e10f;
         int closest = 0;
         
         for (int v = 0; v < 4; v++) {
-            float dist = length3(z - vertices[v]);
-            if (dist < min_dist) {
-                min_dist = dist;
+            float vdist = length3(z - vertices[v]);
+            if (vdist < min_vdist) {
+                min_vdist = vdist;
                 closest = v;
             }
         }
         
+        // Scale towards closest vertex
         z = (z - vertices[closest]) * sierpinski_scale + vertices[closest];
-        s *= sierpinski_scale;
     }
     
-    float r = length3(z);
-    return (r - 1.5f) / s;
-}
-
-inline FractalData get_sierpinski(float3 pos, int max_iter, float sierpinski_scale) {
-    FractalData data;
-    float dist = sierpinski_sdf(pos, max_iter, sierpinski_scale);
-    data.iteration = (dist < EPSILON) ? (float)max_iter : log(dist + 1.0f) * 10.0f;
-    data.trap = dist;
+    data.iteration = (float)max_iter;
+    data.trap = min_dist;
     return data;
 }
 
@@ -307,7 +349,7 @@ inline FractalData get_fractal_data(
     float julia_cx, float julia_cy, float julia_cz,
     float mandelbulb_power,
     float mandelbox_scale, float mandelbox_folding,
-    float apollonian_scale,
+    float apollonian_scale, float apollonian_offset, float apollonian_power,
     float menger_scale,
     float sierpinski_scale
 ) {
@@ -321,7 +363,7 @@ inline FractalData get_fractal_data(
         case FRACTAL_MANDELBOX:
             return get_mandelbox(pos, max_iter, mandelbox_scale, mandelbox_folding);
         case FRACTAL_APOLLONIAN:
-            return get_apollonian(pos, max_iter, apollonian_scale);
+            return get_apollonian(pos, max_iter, apollonian_scale, apollonian_offset, apollonian_power);
         case FRACTAL_MENGER:
             return get_menger(pos, max_iter, menger_scale);
         case FRACTAL_SIERPINSKI:
