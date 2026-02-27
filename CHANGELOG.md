@@ -2,6 +2,14 @@
 
 All notable changes to StepMarch will be documented in this file.
 
+## [1.0.1] - 2026-02-26
+
+### Fixed
+- **Animation interpolation bug**: Fixed fractal_type (and other integer parameters) jumping between keyframes during playback
+  - Added explicit copy constructor to `Params` struct to ensure all fields are correctly copied during keyframe interpolation
+  - Added explicit safeguard to preserve integer parameters (fractal_type, max_iter, hollow, seed_offset, floor_enable, metallic, color_mode) from first keyframe
+  - Integer parameters are now correctly treated as discrete values that should not be interpolated
+
 ## [1.0.0] - 2026-02-26
 
 ### Added
