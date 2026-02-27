@@ -2,6 +2,14 @@
 
 All notable changes to StepMarch will be documented in this file.
 
+## [1.0.2] - 2026-02-26
+
+### Changed
+- **Escape key behavior**: No longer exits the program
+  - ESC now releases mouse capture if the cursor is "lost" during camera navigation
+  - Visual indicator shown in red when mouse is captured: "MOUSE CAPTURED - Press ESC to release"
+  - Program exit moved to File > Exit menu and window close button only
+
 ## [1.0.1] - 2026-02-26
 
 ### Fixed

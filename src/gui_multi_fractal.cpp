@@ -1110,7 +1110,21 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT) running = false;
-            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) running = false;
+            
+            // ESCAPE key: release mouse capture if active, otherwise show help hint
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+                SDL_bool is_captured = SDL_GetRelativeMouseMode();
+                if (is_captured) {
+                    SDL_SetRelativeMouseMode(SDL_FALSE);
+                    is_orbiting = false;
+                    is_panning = false;
+                    printf("Mouse capture released - press ESC again to show this message\n");
+                } else {
+                    // When not captured, ESC could show a help dialog or be unused
+                    // For now, just print a hint that mouse is already free
+                    printf("Mouse already free - use File > Exit or close window to quit\n");
+                }
+            }
             
             // Houdini-style camera controls (only when mouse is over preview image)
             // Check if mouse is over the 3D preview area
@@ -1407,7 +1421,11 @@ int main(int argc, char** argv) {
         ImGui::Text("Preview - Frame %d %s", proj.current_frame, is_playing ? "(Playing)" : "");
         
         // Camera controls hint - shows active state
-        if (is_orbiting) {
+        // Show mouse capture warning
+        SDL_bool mouse_captured = SDL_GetRelativeMouseMode();
+        if (mouse_captured) {
+            ImGui::TextColored(ImVec4(1, 0, 0, 1), "MOUSE CAPTURED - Press ESC to release");
+        } else if (is_orbiting) {
             ImGui::TextColored(ImVec4(0, 1, 0, 1), "Camera: ORBITING (Alt+LMB)");
         } else if (is_panning) {
             ImGui::TextColored(ImVec4(0, 1, 0, 1), "Camera: PANNING (Alt+MMB)");

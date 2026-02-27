@@ -1,8 +1,8 @@
-# StepMarch v1.0.1
+# StepMarch v1.0.2
 
 **GPU-Accelerated Multi-Fractal 3D Renderer with Animation System**
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![OpenCL](https://img.shields.io/badge/GPU-OpenCL-orange)
 
@@ -174,4 +174,4 @@ Created by Jeff Abraham with OpenClaw assistance
 
 ---
 
-**Version 1.0.1** - Bugfix Release
+**Version 1.0.2** - Improved UX Release
