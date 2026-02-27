@@ -2,6 +2,15 @@
 
 All notable changes to StepMarch will be documented in this file.
 
+## [1.0.3] - 2026-02-26
+
+### Added
+- **Visual cursor feedback** for camera controls
+  - Hand cursor appears when Alt key is held and mouse is over preview
+  - Grab cursor shows during active camera operations (orbit/pan)
+  - Normal arrow cursor restored when not in camera control mode
+  - Makes camera control availability more discoverable
+
 ## [1.0.2] - 2026-02-26
 
 ### Changed

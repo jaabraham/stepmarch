@@ -1103,6 +1103,12 @@ int main(int argc, char** argv) {
     ImVec2 preview_min(0, 0);
     ImVec2 preview_max(0, 0);
     
+    // Create cursors for visual feedback
+    SDL_Cursor* default_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    SDL_Cursor* hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+    SDL_Cursor* grab_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEALL);
+    SDL_Cursor* current_cursor = default_cursor;
+    
     while (running) {
         Uint32 current_time = SDL_GetTicks();
         
@@ -1195,6 +1201,28 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+        }
+        
+        // Update cursor based on Alt key state and mouse position
+        // Only change cursor when mouse is over the preview area
+        int cursor_mouse_x, cursor_mouse_y;
+        SDL_GetMouseState(&cursor_mouse_x, &cursor_mouse_y);
+        bool cursor_over_preview = (cursor_mouse_x >= preview_min.x && cursor_mouse_x < preview_max.x &&
+                                    cursor_mouse_y >= preview_min.y && cursor_mouse_y < preview_max.y);
+        
+        const Uint8* cursor_key_state = SDL_GetKeyboardState(NULL);
+        bool alt_held = cursor_key_state[SDL_SCANCODE_LALT] || cursor_key_state[SDL_SCANCODE_RALT];
+        
+        SDL_Cursor* new_cursor = default_cursor;
+        if (is_orbiting || is_panning) {
+            new_cursor = grab_cursor;
+        } else if (alt_held && cursor_over_preview) {
+            new_cursor = hand_cursor;
+        }
+        
+        if (new_cursor != current_cursor) {
+            SDL_SetCursor(new_cursor);
+            current_cursor = new_cursor;
         }
         
         // Handle active camera operations (mouse motion)
@@ -2125,6 +2153,11 @@ int main(int argc, char** argv) {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
+    
+    // Free cursors
+    SDL_FreeCursor(default_cursor);
+    SDL_FreeCursor(hand_cursor);
+    SDL_FreeCursor(grab_cursor);
     
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
